@@ -1,0 +1,150 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CICD Pipeline
+
+# Controls when the action will run. 
+on:
+  # Triggers the workflow on push
+  push:
+    branches: [ main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GKE_PROJECT }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  DEPLOYMENT_NAME_1: ${{ secrets.DEPLOYMENT_NAME_1 }}
+  DEPLOYMENT_NAME_2: ${{ secrets.DEPLOYMENT_NAME_2 }}
+  DEPLOYMENT_NAME_3: ${{ secrets.DEPLOYMENT_NAME_3 }}
+  IMAGE_1: ${{ secrets.DOCKER_HUB_USERNAME }}/ms2-hellotextkubernetes
+  IMAGE_2: ${{ secrets.DOCKER_HUB_USERNAME }}/ms1-helloworldkubernetes
+  IMAGE_3: ${{ secrets.DOCKER_HUB_USERNAME }}/angular-hello-world
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    name: Build Job
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Check Out Repo
+        uses: actions/checkout@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Build and push hello-text
+        id: docker_build_hello-text
+        uses: docker/build-push-action@v2
+        with:
+          context: ./hellotextkubernetes
+          file: ./hellotextkubernetes/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_1 }}:${{ github.sha }}
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+      - name: Build and push hello-world
+        id: docker_build_hello_world
+        uses: docker/build-push-action@v2
+        with:
+          context: ./helloworldkubernetes
+          file: ./helloworldkubernetes/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_2 }}:${{ github.sha }}
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+      - name: Build and push angular-hello-world
+        id: docker_build_angular_hello_world
+        uses: docker/build-push-action@v2
+        with:
+          context: ./angular-hello-world
+          file: ./angular-hello-world/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_3 }}:${{ github.sha }}
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+      # Setup gcloud CLI
+      - name: Setup Cloud CLI
+        uses: google-github-actions/setup-gcloud@v0.2.0
+        with:
+          service_account_key: ${{ secrets.GKE_SA_KEY }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      # Configure docker to use the gcloud command-line tool as a credential helper
+      - run: |-
+          gcloud --quiet auth configure-docker
+
+      # Get the GKE credentials so we can deploy to the cluster
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v0.2.1
+        with:
+          cluster_name: ${{ secrets.GKE_CLUSTER }}
+          location: ${{ secrets.GKE_ZONE }}
+          credentials: ${{ secrets.GKE_SA_KEY }}
+
+      # Set up kustomize
+      - name: Set up Kustomize
+        run: |-
+          curl -sfLo kustomize https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
+          chmod u+x ./kustomize
+
+
+      # Deploy the Docker image to the GKE cluster
+      - name: Deploy
+        run: |-
+          cd angular-hello-world
+          ../kustomize edit set image USERNAME/IMAGE3:TAG=$DOCKER_HUB_USERNAME/$IMAGE_3:$GITHUB_SHA
+          ../kustomize build . | kubectl apply -f -
+          cd ../helloworldkubernetes
+          ../kustomize edit set image USERNAME/IMAGE2:TAG=$DOCKER_HUB_USERNAME/$IMAGE_2:$GITHUB_SHA
+          ../kustomize build . | kubectl apply -f -
+          cd ../helloworldkubernetes
+          ../kustomize edit set image USERNAME/IMAGE1:TAG=$DOCKER_HUB_USERNAME/$IMAGE_1:$GITHUB_SHA
+          ../kustomize build . | kubectl apply -f -
+          kubectl get pods -o wide
+          kubectl get services -o wide
+
+#      # Set the target Azure Kubernetes Service (AKS) cluster.
+#      - name: Login to AKS
+#        uses: azure/aks-set-context@v1
+#        with:
+#          creds: '${{ secrets.AZURE_CREDENTIALS }}'
+#          cluster-name: ${{ env.CLUSTER_NAME }}
+#          resource-group: ${{ env.CLUSTER_RESOURCE_GROUP }}
+#
+#      # Create namespace if doesn't exist
+#      - name: Create Namespace on AKS if doesn't exists
+#        run: |
+#          kubectl create namespace ${{ env.NAMESPACE }} --dry-run -o json | kubectl apply -f -
+#
+#      # Deploy app to AKS
+#      - uses: azure/k8s-deploy@v1
+#        with:
+#          manifests: |
+#            manifests/deployment.yml
+#            manifests/service.yml
+#          images: |
+#            ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }}
+#          imagepullsecrets: |
+#            ${{ env.SECRET }}
+#          namespace: ${{ env.NAMESPACE }}
+

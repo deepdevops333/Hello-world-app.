@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+        - image: USERNAME/IMAGE2:TAG
+          imagePullPolicy: Always
+          name: ms1-helloworldkubernetes
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+  selector:
+    app: hello-world
+---
+# yaml to provide custom environment variables for microservice communication.
+#apiVersion: v1
+#data:
+#  HELLO_TEXT_URI: http://hello-text
+#kind: ConfigMap
+#metadata:
+#  name: hello-world
+
